@@ -392,7 +392,7 @@ function calculateSummary(points: any[]) {
     };
 }
 
-function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
     var R = 6371;
     var dLat = deg2rad(lat2 - lat1);
     var dLon = deg2rad(lon2 - lon1);
@@ -405,11 +405,11 @@ function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon
     return d;
 }
 
-function deg2rad(deg: number) {
+function deg2rad(deg: number): number {
     return deg * (Math.PI / 180);
 }
 
-function simplifyPoints(points: any[], epsilon: number) {
+function simplifyPoints(points: any[], epsilon: number): any[] {
     if (points.length <= 2) return points;
 
     let dmax = 0;
@@ -433,7 +433,7 @@ function simplifyPoints(points: any[], epsilon: number) {
     }
 }
 
-function perpendicularDistance(point: any, lineStart: any, lineEnd: any) {
+function perpendicularDistance(point: any, lineStart: any, lineEnd: any): number {
     let dx = lineEnd.lng - lineStart.lng;
     let dy = lineEnd.lat - lineStart.lat;
 
