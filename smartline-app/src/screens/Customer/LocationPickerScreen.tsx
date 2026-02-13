@@ -1,0 +1,197 @@
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, SafeAreaView, Dimensions, ActivityIndicator } from 'react-native';
+import MapView, { UrlTile, Region } from 'react-native-maps';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../../types/navigation';
+import { Colors } from '../../constants/Colors';
+import { ArrowLeft, MapPin } from 'lucide-react-native';
+import * as Location from 'expo-location';
+import axios from 'axios';
+
+type LocationPickerNavigationProp = NativeStackNavigationProp<RootStackParamList, 'LocationPicker'>;
+type LocationPickerRouteProp = RouteProp<RootStackParamList, 'LocationPicker'>;
+
+const { width, height } = Dimensions.get('window');
+const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
+
+// 👽 02-02-2026: Extracted UrlTile to a component or memoize it to prevent re-creation on every render
+const MapTiles = React.memo(() => (
+    <UrlTile
+        urlTemplate={`https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${MAPBOX_ACCESS_TOKEN}`}
+        maximumZ={19}
+        flipY={false}
+        tileSize={256}
+    />
+));
+
+export default function LocationPickerScreen() {
+    const navigation = useNavigation<LocationPickerNavigationProp>();
+    const route = useRoute<LocationPickerRouteProp>();
+    const { field } = route.params;
+
+    const [region, setRegion] = useState<Region | undefined>(undefined); // 👽 02-02-2026: Changed to undefined initially to wait for location
+    // const [region, setRegion] = useState<Region>({ ... });
+    const [address, setAddress] = useState<string>('Loading...');
+    const [isDragging, setIsDragging] = useState(false);
+    const [loading, setLoading] = useState(false);
+
+    // Get current location on mount
+    useEffect(() => {
+        (async () => {
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') return;
+
+            let location = await Location.getCurrentPositionAsync({});
+            setRegion({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            });
+            // 👽 02-02-2026: Fetch initial address
+            fetchAddress(location.coords.latitude, location.coords.longitude);
+        })();
+    }, []);
+
+    // 👽 02-02-2026: Memoize handlers to keep props stable
+    const onRegionChange = React.useCallback(() => {
+        setIsDragging(true);
+    }, []);
+
+    const onRegionChangeComplete = React.useCallback(async (newRegion: Region) => {
+        // regionRef.current = newRegion; // Keep track via ref
+        // 👽 Update ref directly? Yes.
+        // But we need to update the ref variable derived from state? No, regionRef is a ref.
+        // We can't access regionRef inside useCallback unless it's in deps or we use a ref for the ref? 
+        // Actually, just using a module-level var or maintaining the ref pattern is fine.
+        // To be safe and clean, let's just do the fetching here.
+
+        setIsDragging(false);
+        fetchAddress(newRegion.latitude, newRegion.longitude);
+    }, []);
+
+    const regionRef = React.useRef<Region | undefined>(undefined); // 👽 02-02-2026: Restored regionRef
+
+    const fetchAddress = async (lat: number, lng: number) => {
+        setLoading(true);
+        try {
+            const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${MAPBOX_ACCESS_TOKEN}&types=address,poi,neighborhood`;
+            const response = await axios.get(url);
+            if (response.data.features && response.data.features.length > 0) {
+                setAddress(response.data.features[0].place_name);
+            } else {
+                setAddress('Unknown location');
+            }
+        } catch (error) {
+            console.error(error);
+            setAddress('Error fetching address');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleConfirm = () => {
+        const currentRegion = regionRef.current || region;
+        if (!currentRegion) return;
+
+        navigation.navigate('SearchLocation', {
+            selectedAddress: address,
+            selectedCoordinates: { latitude: currentRegion.latitude, longitude: currentRegion.longitude },
+            field: field,
+            returnScreen: route.params.returnScreen,
+            currentPickup: route.params.currentPickup,
+            currentDest: route.params.currentDest
+        });
+    };
+
+    return (
+        <View style={styles.container}>
+            {region && (
+                <MapView
+                    style={styles.map}
+                    initialRegion={region}
+                    onRegionChange={onRegionChange}
+                    onRegionChangeComplete={(r) => {
+                        regionRef.current = r; // Update ref
+                        onRegionChangeComplete(r);
+                    }}
+                    userInterfaceStyle="light"
+                >
+                    <MapTiles />
+                </MapView>
+            )}
+
+            <View style={styles.centerMarkerContainer} pointerEvents="none">
+                <MapPin size={40} color={Colors.primary} fill={Colors.primary} />
+                <View style={styles.markerDot} />
+            </View>
+
+            {/* Header Overlay */}
+            <SafeAreaView style={styles.header} pointerEvents="box-none">
+                <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+                    <ArrowLeft size={24} color="#1e1e1e" />
+                </TouchableOpacity>
+            </SafeAreaView>
+
+            {/* Bottom Sheet for confirmation */}
+            <View style={styles.bottomSheet}>
+                <Text style={styles.label}>{field === 'pickup' ? 'Pick up location' : 'Destination'}</Text>
+
+                <View style={styles.addressContainer}>
+                    {loading ? (
+                        <ActivityIndicator size="small" color={Colors.primary} />
+                    ) : (
+                        <Text style={styles.addressText} numberOfLines={2}>{address}</Text>
+                    )}
+                </View>
+
+                <TouchableOpacity
+                    style={[styles.confirmButton, loading && styles.disabledButton]}
+                    onPress={handleConfirm}
+                    disabled={loading}
+                >
+                    <Text style={styles.confirmButtonText}>Confirm Location</Text>
+                </TouchableOpacity>
+            </View>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#fff' },
+    map: { flex: 1 },
+    header: { position: 'absolute', top: 40, left: 0, right: 0, padding: 16 }, // 👽 02-02-2026: Increased top (was 0)
+    backButton: {
+        width: 40, height: 40, borderRadius: 20, backgroundColor: '#fff',
+        alignItems: 'center', justifyContent: 'center',
+        shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 5, elevation: 3
+    },
+    centerMarkerContainer: {
+        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+        justifyContent: 'center', alignItems: 'center',
+        marginBottom: 40 // Adjust for pin height so the tip is at center
+    },
+    markerDot: {
+        width: 4, height: 4, borderRadius: 2, backgroundColor: '#000', marginTop: -4, opacity: 0.3
+    },
+    bottomSheet: {
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 24, borderTopRightRadius: 24,
+        padding: 24,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 10
+    },
+    label: { fontSize: 14, color: '#6B7280', marginBottom: 8, fontWeight: '600', textTransform: 'uppercase' },
+    addressContainer: {
+        minHeight: 50, justifyContent: 'center', marginBottom: 20,
+        borderBottomWidth: 1, borderBottomColor: '#F3F4F6', paddingBottom: 16
+    },
+    addressText: { fontSize: 18, color: '#111827', fontWeight: '600' },
+    confirmButton: {
+        backgroundColor: Colors.primary,
+        paddingVertical: 16, borderRadius: 12, alignItems: 'center'
+    },
+    disabledButton: { opacity: 0.7 },
+    confirmButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' }
+});
