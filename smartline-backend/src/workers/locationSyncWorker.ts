@@ -1,5 +1,5 @@
-import { Worker, Queue } from 'bullmq';
-import redis from '../config/redis';
+import { Worker, Queue, Job } from 'bullmq';
+import { checkRedisConnection } from '../config/redis';
 import { locationCache } from '../services/locationCache';
 import { DriverRepository } from '../repositories/DriverRepository';
 import { config } from '../config/env';
@@ -14,97 +14,65 @@ const connection = {
   password: config.REDIS_PASSWORD || undefined,
 };
 
-// Create queue
-export const locationSyncQueue = new Queue(queueName, { connection });
-
-// QueueScheduler removed (deprecated/integrated)
-
-// Create scheduler for delayed/repeatable jobs
-// The QueueScheduler is often not explicitly needed when using repeatable jobs with a Worker,
-// as the Worker itself can handle the scheduling aspect.
-// However, if you need a dedicated scheduler process, you would uncomment and run this.
-// Scheduler removed
+// Queue and Worker instances (initialized lazily)
+export let locationSyncQueue: Queue | undefined;
+export let locationSyncWorker: Worker | undefined;
 
 /**
- * Location Sync Worker
+ * Location Sync Job Processor
  * Syncs location data from Redis cache to PostgreSQL database
- * Runs every 5 seconds to batch update driver locations
  */
-export const locationSyncWorker = new Worker(
-  queueName,
-  async (job) => {
-    try {
-      console.log(`[LocationSync] Processing job ${job.id}`);
+const locationSyncProcessor = async (job: Job) => {
+  try {
+    console.log(`[LocationSync] Processing job ${job.id}`);
 
-      // Get all online driver IDs from Redis
-      const onlineDriverIds = await locationCache.getOnlineDriverIds();
+    // Get all online driver IDs from Redis
+    const onlineDriverIds = await locationCache.getOnlineDriverIds();
 
-      if (onlineDriverIds.length === 0) {
-        console.log('[LocationSync] No online drivers to sync');
-        return { synced: 0 };
-      }
-
-      console.log(`[LocationSync] Syncing ${onlineDriverIds.length} drivers`);
-
-      let syncedCount = 0;
-      let errorCount = 0;
-
-      // Batch process driver locations
-      for (const driverId of onlineDriverIds) {
-        try {
-          const location = await locationCache.getDriverLocation(driverId);
-
-          if (location) {
-            // Update PostgreSQL with latest location
-            await driverRepo.updateLocation(
-              driverId,
-              location.lat,
-              location.lng
-            );
-            syncedCount++;
-          }
-        } catch (error) {
-          console.error(`[LocationSync] Failed to sync driver ${driverId}:`, error);
-          errorCount++;
-        }
-      }
-
-      console.log(
-        `[LocationSync] Completed: ${syncedCount} synced, ${errorCount} errors`
-      );
-
-      return {
-        synced: syncedCount,
-        errors: errorCount,
-        timestamp: new Date().toISOString(),
-      };
-    } catch (error: any) {
-      console.error('[LocationSync] Worker error:', error);
-      throw error;
+    if (onlineDriverIds.length === 0) {
+      console.log('[LocationSync] No online drivers to sync');
+      return { synced: 0 };
     }
-  },
-  {
-    connection,
-    concurrency: 1, // Process one job at a time
-    limiter: {
-      max: 10, // Max 10 jobs
-      duration: 1000, // Per second
-    },
+
+    console.log(`[LocationSync] Syncing ${onlineDriverIds.length} drivers`);
+
+    let syncedCount = 0;
+    let errorCount = 0;
+
+    // Batch process driver locations
+    for (const driverId of onlineDriverIds) {
+      try {
+        const location = await locationCache.getDriverLocation(driverId);
+
+        if (location) {
+          // Update PostgreSQL with latest location
+          await driverRepo.updateLocation(
+            driverId,
+            location.lat,
+            location.lng
+          );
+          syncedCount++;
+        }
+      } catch (error) {
+        console.error(`[LocationSync] Failed to sync driver ${driverId}:`, error);
+        errorCount++;
+      }
+    }
+
+    console.log(
+      `[LocationSync] Completed: ${syncedCount} synced, ${errorCount} errors`
+    );
+
+    return {
+      synced: syncedCount,
+      errors: errorCount,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error: any) {
+    console.error('[LocationSync] Worker error:', error);
+    throw error;
   }
-);
-
-// Worker event handlers
-locationSyncWorker.on('completed', (job, result) => {
-  console.log(`[LocationSync] Job ${job.id} completed:`, result);
-});
-
-locationSyncWorker.on('failed', (job, error) => {
-  console.error(`[LocationSync] Job ${job?.id} failed:`, error.message);
-});
-
-locationSyncWorker.on('error', (error) => {
-  console.error('[LocationSync] Worker error:', error);
-});
+};
 
 /**
  * Start location sync worker
@@ -112,6 +80,43 @@ locationSyncWorker.on('error', (error) => {
  */
 export async function startLocationSync() {
   try {
+    // Check if Redis is available
+    const isRedisAvailable = await checkRedisConnection();
+    if (!isRedisAvailable) {
+      console.warn('⚠️  Redis unavailable - Skipping location sync worker initialization');
+      return;
+    }
+
+    // Initialize Queue if not exists
+    if (!locationSyncQueue) {
+      locationSyncQueue = new Queue(queueName, { connection });
+    }
+
+    // Initialize Worker if not exists
+    if (!locationSyncWorker) {
+      locationSyncWorker = new Worker(queueName, locationSyncProcessor, {
+        connection,
+        concurrency: 1, // Process one job at a time
+        limiter: {
+          max: 10, // Max 10 jobs
+          duration: 1000, // Per second
+        },
+      });
+
+      // Worker event handlers
+      locationSyncWorker.on('completed', (job, result) => {
+        console.log(`[LocationSync] Job ${job.id} completed:`, result);
+      });
+
+      locationSyncWorker.on('failed', (job, error) => {
+        console.error(`[LocationSync] Job ${job?.id} failed:`, error.message);
+      });
+
+      locationSyncWorker.on('error', (error) => {
+        console.error('[LocationSync] Worker error:', error);
+      });
+    }
+
     // Remove any existing repeatable jobs
     const repeatableJobs = await locationSyncQueue.getRepeatableJobs();
     for (const job of repeatableJobs) {
@@ -134,7 +139,7 @@ export async function startLocationSync() {
     console.log('✅ Location sync worker started (every 5 seconds)');
   } catch (error) {
     console.error('❌ Failed to start location sync worker:', error);
-    throw error;
+    // Don't throw, just log error to allow server to continue
   }
 }
 
@@ -143,9 +148,14 @@ export async function startLocationSync() {
  */
 export async function stopLocationSync() {
   try {
-    await locationSyncWorker.close();
-    await locationSyncQueue.close();
-    // await scheduler.close();
+    if (locationSyncWorker) {
+      await locationSyncWorker.close();
+      locationSyncWorker = undefined;
+    }
+    if (locationSyncQueue) {
+      await locationSyncQueue.close();
+      locationSyncQueue = undefined;
+    }
     console.log('✅ Location sync worker stopped');
   } catch (error) {
     console.error('❌ Failed to stop location sync worker:', error);

@@ -8,6 +8,13 @@ const connection: ConnectionOptions = {
   port: config.REDIS_PORT,
   password: config.REDIS_PASSWORD || undefined,
   maxRetriesPerRequest: null,
+  retryStrategy(times: number) {
+    if (times > 3) {
+      console.warn('⚠️  Redis unavailable - Queue running in disconnected mode');
+      return null; // Stop retrying
+    }
+    return Math.min(times * 1000, 3000);
+  },
 };
 
 

@@ -1,10 +1,11 @@
-import { Worker } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import { config } from '../config/env';
 import { QUEUE_NAMES } from '../config/queue';
 import { SmartLineEvent, EVENT_TYPES } from '../events/types';
 import { matchingService } from '../services/matchingService';
 import { dispatchStrategy, DispatchStrategy } from '../services/dispatchStrategy';
 import { eventPublisher } from '../events/publisher';
+import { checkRedisConnection } from '../config/redis';
 
 const connection = {
   host: config.REDIS_HOST,
@@ -12,58 +13,106 @@ const connection = {
   password: config.REDIS_PASSWORD || undefined,
 };
 
+export let tripEventsWorker: Worker | undefined;
+
 /**
- * Trip Events Worker - Processes trip lifecycle events
+ * Trip Events Processor
  * Handles matching, notifications, and state transitions
  */
-export const tripEventsWorker = new Worker(
-  QUEUE_NAMES.TRIP_EVENTS,
-  async (job) => {
-    const event = job.data as SmartLineEvent;
+const tripEventsProcessor = async (job: Job) => {
+  const event = job.data as SmartLineEvent;
 
-    console.log(`[TripEvents] Processing: ${event.eventType}`);
+  console.log(`[TripEvents] Processing: ${event.eventType}`);
 
-    try {
-      switch (event.eventType) {
-        case EVENT_TYPES.TRIP_REQUESTED:
-          await handleTripRequested(event as any);
-          break;
+  try {
+    switch (event.eventType) {
+      case EVENT_TYPES.TRIP_REQUESTED:
+        await handleTripRequested(event as any);
+        break;
 
-        case EVENT_TYPES.TRIP_MATCHED:
-          await handleTripMatched(event as any);
-          break;
+      case EVENT_TYPES.TRIP_MATCHED:
+        await handleTripMatched(event as any);
+        break;
 
-        case EVENT_TYPES.TRIP_DRIVER_ARRIVED:
-          await handleDriverArrived(event as any);
-          break;
+      case EVENT_TYPES.TRIP_DRIVER_ARRIVED:
+        await handleDriverArrived(event as any);
+        break;
 
-        case EVENT_TYPES.TRIP_STARTED:
-          await handleTripStarted(event as any);
-          break;
+      case EVENT_TYPES.TRIP_STARTED:
+        await handleTripStarted(event as any);
+        break;
 
-        case EVENT_TYPES.TRIP_COMPLETED:
-          await handleTripCompleted(event as any);
-          break;
+      case EVENT_TYPES.TRIP_COMPLETED:
+        await handleTripCompleted(event as any);
+        break;
 
-        case EVENT_TYPES.TRIP_CANCELLED:
-          await handleTripCancelled(event as any);
-          break;
+      case EVENT_TYPES.TRIP_CANCELLED:
+        await handleTripCancelled(event as any);
+        break;
 
-        default:
-          console.warn(`Unhandled trip event type: ${event.eventType}`);
-      }
-
-      return { success: true, event: event.eventType };
-    } catch (error: any) {
-      console.error(`[TripEvents] Error processing ${event.eventType}:`, error);
-      throw error; // Will trigger retry
+      default:
+        console.warn(`Unhandled trip event type: ${event.eventType}`);
     }
-  },
-  {
-    connection,
-    concurrency: 5, // Process 5 jobs concurrently
+
+    return { success: true, event: event.eventType };
+  } catch (error: any) {
+    console.error(`[TripEvents] Error processing ${event.eventType}:`, error);
+    throw error; // Will trigger retry
   }
-);
+};
+
+/**
+ * Start Trip Events Worker
+ */
+export async function startTripEventsWorker() {
+  try {
+    // Check if Redis is available
+    const isRedisAvailable = await checkRedisConnection();
+    if (!isRedisAvailable) {
+      console.warn('⚠️  Redis unavailable - Skipping Trip Events Worker initialization');
+      return;
+    }
+
+    if (!tripEventsWorker) {
+      tripEventsWorker = new Worker(
+        QUEUE_NAMES.TRIP_EVENTS,
+        tripEventsProcessor,
+        {
+          connection,
+          concurrency: 5, // Process 5 jobs concurrently
+        }
+      );
+
+      // Worker event handlers
+      tripEventsWorker.on('completed', (job, result) => {
+        console.log(`[TripEvents] Job ${job.id} completed:`, result);
+      });
+
+      tripEventsWorker.on('failed', (job, error) => {
+        console.error(`[TripEvents] Job ${job?.id} failed:`, error.message);
+      });
+
+      tripEventsWorker.on('error', (error) => {
+        console.error('[TripEvents] Worker error:', error);
+      });
+
+      console.log('✅ Trip Events Worker initialized');
+    }
+  } catch (error) {
+    console.error('❌ Failed to start Trip Events Worker:', error);
+  }
+}
+
+/**
+ * Stop Trip Events Worker
+ */
+export async function stopTripEventsWorker() {
+  if (tripEventsWorker) {
+    await tripEventsWorker.close();
+    tripEventsWorker = undefined;
+    console.log('✅ Trip Events Worker stopped');
+  }
+}
 
 /**
  * Handle TRIP_REQUESTED event
@@ -247,7 +296,7 @@ async function handleTripCompleted(event: any) {
       recipientId: customerId,
       type: 'push',
       title: 'Trip Completed',
-      message: `Total: ${finalPrice} EGP. Thank you for riding with SmartLine!`,
+      message: 'Earnings will be credited to your wallet',
       priority: 'normal',
       data: { tripId, finalPrice },
     },
@@ -282,20 +331,5 @@ async function handleTripCancelled(event: any) {
   // Handle cancellation fees if applicable
   // Release driver from assignment
 }
-
-// Worker event handlers
-tripEventsWorker.on('completed', (job, result) => {
-  console.log(`[TripEvents] Job ${job.id} completed:`, result);
-});
-
-tripEventsWorker.on('failed', (job, error) => {
-  console.error(`[TripEvents] Job ${job?.id} failed:`, error.message);
-});
-
-tripEventsWorker.on('error', (error) => {
-  console.error('[TripEvents] Worker error:', error);
-});
-
-console.log('✅ Trip Events Worker initialized');
 
 export default tripEventsWorker;
