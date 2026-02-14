@@ -6,7 +6,7 @@ export const useHoneycomb = () => {
     const { data: config, isLoading: isConfigLoading } = useQuery({
         queryKey: ['honeycombConfig'],
         queryFn: honeycombService.fetchFeatureConfig,
-        staleTime: 1000 * 60 * 15, // Cache for 15 minutes as per requirements
+        staleTime: 1000 * 60 * 5, // 5 minutes cache
         retry: 2,
     });
 
