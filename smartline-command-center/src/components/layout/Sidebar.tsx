@@ -22,6 +22,7 @@ import {
   Navigation,
   Activity,
   Gift,
+  RefreshCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,7 @@ const allNavigation: NavItem[] = [
   { name: 'Surge Zones', href: '/surge-zones', icon: Zap, page: 'surge_zones' },
   { name: 'Support', href: '/support', icon: HeadphonesIcon, page: 'support' },
   { name: 'Settings', href: '/settings', icon: Settings, page: 'settings' },
+  { name: 'App Versions', href: '/app-versions', icon: RefreshCcw, page: 'settings' },
   { name: 'System Monitoring', href: '/monitoring', icon: Activity, page: 'settings' }, // Visible to admins with settings access
 ];
 

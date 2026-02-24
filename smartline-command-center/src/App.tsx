@@ -22,6 +22,7 @@ import PromoBanners from '@/pages/PromoBanners';
 import Support from "./pages/Support";
 import Safety from "./pages/Safety";
 import Settings from "./pages/Settings";
+import AppVersions from "./pages/AppVersions";
 import Members from "./pages/Members";
 import AppPopups from '@/pages/AppPopups';
 import SurgeZones from "./pages/SurgeZones";
@@ -75,6 +76,7 @@ const App = () => (
             <Route path="/support" element={<ProtectedPage page="support"><Support /></ProtectedPage>} />
             <Route path="/safety" element={<ProtectedPage page="safety"><Safety /></ProtectedPage>} />
             <Route path="/settings" element={<ProtectedPage page="settings"><Settings /></ProtectedPage>} />
+            <Route path="/app-versions" element={<ProtectedPage page="settings" requiredRoles={['super_admin', 'admin']}><AppVersions /></ProtectedPage>} />
             <Route path="/monitoring" element={<ProtectedPage page="settings" requiredRoles={['super_admin', 'admin']}><SystemMonitoringDashboard /></ProtectedPage>} />
 
             {/* Super Admin only routes */}
