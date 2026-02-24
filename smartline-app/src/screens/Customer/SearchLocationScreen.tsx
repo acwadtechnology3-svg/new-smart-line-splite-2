@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -19,6 +19,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ArrowLeft, Clock, MapPin, Plus, Flame, Home, Briefcase, Star, X, Check } from 'lucide-react-native';
 import { RootStackParamList } from '../../types/navigation';
 import { searchPlaces, reverseGeocode } from '../../services/mapService';
+import { setPickupSelection, getPickupSelection } from '../../state/tripSelectionStore';
 import {
     getSavedLocations,
     addSavedLocation as saveLocationApi,
@@ -72,7 +73,7 @@ export default function SearchLocationScreen() {
 
     const [pickup, setPickup] = useState(t('currentLocation'));
     const [destination, setDestination] = useState('');
-    const [activeField, setActiveField] = useState<SearchField>('destination');
+    const [activeField, setActiveField] = useState<SearchField>('pickup');
     const [results, setResults] = useState<PlaceListItem[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [searchCache, setSearchCache] = useState<Record<string, PlaceListItem[]>>({});
@@ -93,6 +94,8 @@ export default function SearchLocationScreen() {
     const pickupValueRef = useRef(pickup);
     const currentAddressRef = useRef<string | null>(currentAddress);
     const pickupCoordinatesRef = useRef<[number, number] | null>(pickupCoordinates);
+    // Guard: when true, ignore onChangeText from controlled TextInput (programmatic value change)
+    const suppressPickupChange = useRef(false);
 
     const loadData = async () => {
         try {
@@ -189,18 +192,20 @@ export default function SearchLocationScreen() {
         }
 
         if (field === 'pickup') {
-            pickupValueRef.current = selectedAddress;
-            pickupCoordinatesRef.current = selectedCoordinates
+            const coords: [number, number] | null = selectedCoordinates
                 ? [selectedCoordinates.longitude, selectedCoordinates.latitude]
                 : null;
+            pickupValueRef.current = selectedAddress;
+            pickupCoordinatesRef.current = coords;
+            suppressPickupChange.current = true;
             setPickup(selectedAddress);
-            setPickupCoordinates(
-                selectedCoordinates
-                    ? [selectedCoordinates.longitude, selectedCoordinates.latitude]
-                    : null
-            );
+            setPickupCoordinates(coords);
+            setPickupSelection(selectedAddress, coords);
             setActiveField('destination');
-            setTimeout(() => destinationRef.current?.focus(), 300);
+            setTimeout(() => {
+                suppressPickupChange.current = false;
+                destinationRef.current?.focus();
+            }, 300);
             return;
         }
 
@@ -232,17 +237,22 @@ export default function SearchLocationScreen() {
                 const userCoords: [number, number] = [loc.coords.longitude, loc.coords.latitude];
                 setUserLocation(userCoords);
 
-                if (isCurrentPickupSelection(pickupValueRef.current)) {
+                if (isCurrentPickupSelection(pickupValueRef.current) || pickupValueRef.current === '') {
                     pickupCoordinatesRef.current = userCoords;
                     setPickupCoordinates(userCoords);
+                    setPickupSelection(pickupValueRef.current || null, userCoords);
+                    console.log('[SearchLocation] GPS resolved, set current-location coords', userCoords);
                     const address = await reverseGeocode(loc.coords.latitude, loc.coords.longitude);
                     if (!isMounted) return;
 
-                    if (address && isCurrentPickupSelection(pickupValueRef.current)) {
+                    if (address && (isCurrentPickupSelection(pickupValueRef.current) || pickupValueRef.current === '')) {
                         setCurrentAddress(address);
                         currentAddressRef.current = address;
+                        suppressPickupChange.current = true;
                         setPickup(address);
                         pickupValueRef.current = address;
+                        setPickupSelection(address, userCoords);
+                        setTimeout(() => { suppressPickupChange.current = false; }, 100);
                     }
                 }
             } catch (error) {
@@ -297,10 +307,17 @@ export default function SearchLocationScreen() {
     };
 
     const handlePickupChange = (text: string) => {
+        // Skip if this is a programmatic value change (e.g. from handleSelectPlace)
+        if (suppressPickupChange.current) {
+            console.log('[SearchLocation] handlePickupChange suppressed (programmatic)', text);
+            return;
+        }
+        console.log('[SearchLocation] handlePickupChange (user typing)', text);
         pickupValueRef.current = text;
         pickupCoordinatesRef.current = null;
         setPickup(text);
         setPickupCoordinates(null);
+        setPickupSelection(null, null);
         setActiveField('pickup');
         handleSearch(text);
     };
@@ -311,11 +328,20 @@ export default function SearchLocationScreen() {
         handleSearch(text);
     };
 
+    // Focus the correct input on mount or when the field param changes.
+    // IMPORTANT: Do NOT include `pickup` in the dependency array — that would
+    // reset activeField back to 'pickup' every time the pickup text changes,
+    // which breaks the pickup→destination flow.
     useEffect(() => {
         if (route.params?.field) {
             setActiveField(route.params.field);
             if (route.params.field === 'pickup') {
-                if (pickup === t('currentLocation')) setPickup('');
+                if (pickupValueRef.current === t('currentLocation')) {
+                    pickupValueRef.current = '';
+                    suppressPickupChange.current = true;
+                    setPickup('');
+                    setTimeout(() => { suppressPickupChange.current = false; }, 50);
+                }
                 setTimeout(() => pickupRef.current?.focus(), 100);
             } else {
                 setTimeout(() => destinationRef.current?.focus(), 100);
@@ -324,18 +350,123 @@ export default function SearchLocationScreen() {
         }
 
         const id = setTimeout(() => {
-            destinationRef.current?.focus();
-            setActiveField('destination');
+            // Default: clear the placeholder so user can type, but preserve coords
+            if (pickupValueRef.current === t('currentLocation')) {
+                pickupValueRef.current = '';
+                suppressPickupChange.current = true;
+                setPickup('');
+                setTimeout(() => { suppressPickupChange.current = false; }, 50);
+            }
+            pickupRef.current?.focus();
+            setActiveField('pickup');
         }, 100);
 
         return () => clearTimeout(id);
-    }, [route.params?.field, pickup, t]);
+    }, [route.params?.field, t]);
 
-    const handleSelectPlace = (place: PlaceListItem) => {
+    const ensurePickupCoordinates = useCallback(async (): Promise<[number, number] | null> => {
+        if (pickupCoordinatesRef.current) {
+            console.log('[SearchLocation] ensurePickupCoordinates → using ref', pickupCoordinatesRef.current);
+            return pickupCoordinatesRef.current;
+        }
+
+        // Check the store as a second cache layer
+        const storeState = getPickupSelection();
+        if (storeState.pickupCoords) {
+            pickupCoordinatesRef.current = storeState.pickupCoords;
+            console.log('[SearchLocation] ensurePickupCoordinates → using store', storeState.pickupCoords);
+            return storeState.pickupCoords;
+        }
+
+        let pickupText = pickupValueRef.current?.trim();
+        console.log('[SearchLocation] ensurePickupCoordinates → resolving', {
+            pickupText,
+            refCoords: pickupCoordinatesRef.current,
+            storeCoords: storeState.pickupCoords,
+        });
+        // If pickup text is empty, treat it as "Current Location" (the default)
+        if (!pickupText) {
+            pickupText = 'Current Location';
+            pickupValueRef.current = t('currentLocation');
+        }
+
+        const matchesCurrentLocation =
+            pickupText === t('currentLocation') ||
+            pickupText === 'Current Location' ||
+            (!!currentAddressRef.current && pickupText === currentAddressRef.current);
+
+        if (matchesCurrentLocation) {
+            if (userLocation) {
+                pickupCoordinatesRef.current = userLocation;
+                setPickupCoordinates(userLocation);
+                setPickupSelection(pickupValueRef.current || null, userLocation);
+                console.log('[SearchLocation] using cached userLocation for pickup');
+                return userLocation;
+            }
+            // userLocation not yet resolved – fetch GPS directly
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                    const coords: [number, number] = [loc.coords.longitude, loc.coords.latitude];
+                    pickupCoordinatesRef.current = coords;
+                    setPickupCoordinates(coords);
+                    setUserLocation(coords);
+                    setPickupSelection(pickupValueRef.current || null, coords);
+                    console.log('[SearchLocation] fetched GPS for current-location pickup', { coords });
+                    return coords;
+                }
+            } catch (error) {
+                console.log('[SearchLocation] GPS fetch failed for current-location pickup', error);
+            }
+        }
+
+        try {
+            const places = await searchPlaces(pickupText, userLocation || undefined, undefined, language);
+            if (places.length > 0 && places[0].center) {
+                const coords: [number, number] = [places[0].center[0], places[0].center[1]];
+                pickupCoordinatesRef.current = coords;
+                setPickupCoordinates(coords);
+                setPickupSelection(pickupValueRef.current || pickupText, coords);
+                console.log('[SearchLocation] resolved pickup via Mapbox search', { coords });
+                return coords;
+            }
+        } catch (error) {
+            console.log('[SearchLocation] Mapbox search failed for pickup', pickupText, error);
+        }
+
+        try {
+            const geocoded = await Location.geocodeAsync(pickupText);
+            if (geocoded.length > 0) {
+                const coords: [number, number] = [geocoded[0].longitude, geocoded[0].latitude];
+                pickupCoordinatesRef.current = coords;
+                setPickupCoordinates(coords);
+                setPickupSelection(pickupValueRef.current || pickupText, coords);
+                console.log('[SearchLocation] resolved pickup via device geocoder', { coords });
+                return coords;
+            }
+        } catch (error) {
+            console.log('[SearchLocation] Failed to geocode pickup text', pickupText, error);
+        }
+
+        console.log('[SearchLocation] Unable to resolve pickup coordinates');
+        return null;
+    }, [userLocation, t, language]);
+
+    const handleSelectPlace = async (place: PlaceListItem) => {
         Keyboard.dismiss();
 
         const selectedAddress = place.place_name || place.address || place.name;
         if (!selectedAddress) return;
+
+        console.log('[SearchLocation] select place', {
+            activeField,
+            selectedAddress,
+            center: place.center,
+            pickupValue: pickupValueRef.current,
+            pickupCoordsRef: pickupCoordinatesRef.current,
+            destination,
+        });
 
         const placeData = place.center
             ? {
@@ -352,6 +483,11 @@ export default function SearchLocationScreen() {
         }
 
         if (route.params?.returnScreen) {
+            console.log('[SearchLocation] navigate returnScreen', {
+                returnScreen: route.params.returnScreen,
+                field: activeField,
+                payload: placeData,
+            });
             navigation.navigate(route.params.returnScreen as any, {
                 [activeField]: placeData,
             });
@@ -359,21 +495,42 @@ export default function SearchLocationScreen() {
         }
 
         if (activeField === 'pickup') {
+            const coords: [number, number] | null = place.center ? [place.center[0], place.center[1]] : null;
             pickupValueRef.current = selectedAddress;
-            pickupCoordinatesRef.current = place.center ? [place.center[0], place.center[1]] : null;
+            pickupCoordinatesRef.current = coords;
+            // Suppress onChangeText so handlePickupChange doesn't clear the coords
+            suppressPickupChange.current = true;
             setPickup(selectedAddress);
-            setPickupCoordinates(place.center ? [place.center[0], place.center[1]] : null);
+            setPickupCoordinates(coords);
+            setPickupSelection(selectedAddress, coords);
+            console.log('[SearchLocation] set pickup', {
+                pickup: selectedAddress,
+                coords,
+                storeAfter: getPickupSelection(),
+            });
             setActiveField('destination');
-            setTimeout(() => destinationRef.current?.focus(), 100);
+            setTimeout(() => {
+                suppressPickupChange.current = false;
+                destinationRef.current?.focus();
+            }, 150);
             return;
         }
 
         setDestination(selectedAddress);
-        navigation.navigate('TripOptions', {
-            pickup: pickupValueRef.current,
+        const resolvedPickupCoords = await ensurePickupCoordinates();
+        const finalPickup = pickupValueRef.current || t('currentLocation');
+        console.log('[SearchLocation] navigate TripOptions', {
+            pickup: finalPickup,
             destination: selectedAddress,
             destinationCoordinates: place.center,
-            pickupCoordinates: pickupCoordinatesRef.current ?? undefined,
+            pickupCoordinates: resolvedPickupCoords,
+            store: getPickupSelection(),
+        });
+        navigation.navigate('TripOptions', {
+            pickup: finalPickup,
+            destination: selectedAddress,
+            destinationCoordinates: place.center,
+            pickupCoordinates: resolvedPickupCoords ?? undefined,
         });
     };
 
@@ -580,7 +737,10 @@ export default function SearchLocationScreen() {
             <View style={styles.contentContainer}>
                 <View style={styles.topSection}>
                     <View style={[styles.headerRow, { flexDirection }]}>
-                        <TouchableOpacity style={[styles.backButton, { backgroundColor: colors.surface2 }]} onPress={() => navigation.goBack()}>
+                        <TouchableOpacity
+                            style={[styles.backButton, { backgroundColor: colors.surface2 }]}
+                            onPress={() => navigation.reset({ index: 0, routes: [{ name: 'CustomerHome' as keyof RootStackParamList }] })}
+                        >
                             <ArrowLeft size={22} color={colors.textPrimary} />
                         </TouchableOpacity>
 

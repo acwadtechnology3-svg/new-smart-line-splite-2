@@ -14,9 +14,8 @@ import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { Input } from '../../components/ui/Input';
 
-const BACKEND_URL = Constants.expoConfig?.hostUri
-    ? `http://${Constants.expoConfig.hostUri.split(':').shift()}:3000/api`
-    : 'http://192.168.8.103:3000/api';
+// BACKEND_URL removed as it was redundant and hardcoded. 
+// This screen uses apiRequest which correctly uses central API_URL.
 
 export default function DriverWalletScreen() {
     const navigation = useNavigation();

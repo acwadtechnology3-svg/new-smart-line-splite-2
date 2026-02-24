@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, FlatList, TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, FlatList, TextInput, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, StatusBar } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ArrowLeft, Send, Phone } from 'lucide-react-native';
@@ -166,7 +166,8 @@ export default function ChatScreen() {
     const effectiveUserId = userId || (role === 'customer' ? participants?.customer_id : participants?.driver_id);
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={[styles.container, Platform.OS === 'android' && styles.androidSafeArea]}>
+            <StatusBar barStyle="dark-content" backgroundColor="#fff" />
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <ArrowLeft size={24} color="#1e1e1e" />
@@ -229,6 +230,7 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
+    androidSafeArea: { paddingTop: StatusBar.currentHeight || 0 },
     header: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
     backBtn: { padding: 8 },
     headerInfo: { flex: 1, marginHorizontal: 12 },

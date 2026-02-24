@@ -26,6 +26,7 @@ import { CachedImage } from '../../components/CachedImage';
 import PopupNotification from '../../components/PopupNotification';
 import SurgeMapLayer from '../../components/SurgeMapLayer';
 import { getActiveBanners, PromoBanner } from '../../services/bannerService';
+import { getCachedBanners, cacheBanners, isBannerCacheValid } from '../../services/imageCacheService';
 import { EMPTY_MAP_STYLE, DARK_EMPTY_MAP_STYLE } from '../../constants/MapStyles';
 
 const { width, height } = Dimensions.get('window');
@@ -201,10 +202,26 @@ export default function DriverHomeScreen() {
 
                 // 4. Fetch Banners
                 try {
+                    const cachedBanners = await getCachedBanners();
+                    if (cachedBanners) {
+                        setPromoBanners(cachedBanners);
+                    }
+                    
                     const res = await getActiveBanners('driver');
-                    setPromoBanners(res.banners || []);
+                    const banners = res.banners || [];
+                    
+                    const isCacheValid = await isBannerCacheValid(banners);
+                    if (!isCacheValid) {
+                        await cacheBanners(banners);
+                    }
+                    
+                    setPromoBanners(banners);
                 } catch (e) {
                     console.log("Error fetching banners:", e);
+                    const cachedBanners = await getCachedBanners();
+                    if (cachedBanners) {
+                        setPromoBanners(cachedBanners);
+                    }
                 } finally {
                     setBannersLoading(false);
                 }

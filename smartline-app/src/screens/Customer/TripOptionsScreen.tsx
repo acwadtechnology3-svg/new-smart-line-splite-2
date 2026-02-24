@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, Dimensions, Animated, Modal, TouchableWithoutFeedback, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, Image, I18nManager } from 'react-native';
+import { View, StyleSheet, SafeAreaView, TouchableOpacity, ScrollView, Dimensions, Animated, Modal, TouchableWithoutFeedback, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, Image, I18nManager, PanResponder } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,11 +10,13 @@ import { RootStackParamList } from '../../types/navigation';
 import { Colors } from '../../constants/Colors';
 import { EMPTY_MAP_STYLE, DARK_EMPTY_MAP_STYLE } from '../../constants/MapStyles';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Asset } from 'expo-asset';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import MapTileLayer from '../../components/MapTileLayer';
 import * as Location from 'expo-location';
 import { getDirections, reverseGeocode } from '../../services/mapService';
 import { apiRequest } from '../../services/backend';
+import { getPickupSelection, clearPickupSelection } from '../../state/tripSelectionStore';
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../theme/useTheme';
 import { Text } from '../../components/ui/Text'; // Use Custom Text
@@ -22,17 +24,23 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 
 const { width, height } = Dimensions.get('window');
+const RIDE_LIST_MAX_HEIGHT = Math.max(260, height * 0.28);
+const SNAP_POINTS = {
+    open: 0,
+    mid: Math.max(height * 0.35, 220),
+    closed: Math.max(height * 0.6, 420),
+};
 const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
 type TripOptionsScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'TripOptions'>;
 type TripOptionsScreenRouteProp = RouteProp<RootStackParamList, 'TripOptions'>;
 
 const RIDE_IMAGES: any = {
-    saver: require('../../assets/images/saver.webp'),
-    comfort: require('../../assets/images/comfort.webp'),
-    vip: require('../../assets/images/vip.webp'),
-    taxi: require('../../assets/images/taxi.webp'),
-    scooter: require('../../assets/images/scooter.webp'),
+    saver: require('../../../assets/new-category-images/saver (1).webp'),
+    comfort: require('../../../assets/new-category-images/comfort.webp'),
+    vip: require('../../../assets/new-category-images/vip (1).webp'),
+    taxi: require('../../../assets/new-category-images/taxi.webp'),
+    scooter: require('../../../assets/new-category-images/schooter.webp'),
 };
 
 const BASE_RIDES = [
@@ -44,7 +52,25 @@ const BASE_RIDES = [
 export default function TripOptionsScreen() {
     const navigation = useNavigation<TripOptionsScreenNavigationProp>();
     const route = useRoute<TripOptionsScreenRouteProp>();
-    const { pickup, destination, destinationCoordinates, autoRequest, pickupCoordinates } = route.params;
+    const params = route.params;
+
+    // Read the store ONCE on mount and cache it so clearPickupSelection() doesn't affect re-renders
+    const storeSnapshotRef = useRef(getPickupSelection());
+    const storePickup = storeSnapshotRef.current;
+
+    // Prefer nav params; fall back to the shared tripSelectionStore
+    const pickup = (!params.pickup || params.pickup === 'Current Location' || params.pickup === '')
+        ? (storePickup.pickupAddress || params.pickup || 'Current Location')
+        : params.pickup;
+    const pickupCoordinates = params.pickupCoordinates ?? storePickup.pickupCoords ?? undefined;
+    const { destination, destinationCoordinates, autoRequest } = params;
+
+    console.log('[TripOptions] resolved pickup source', {
+        fromParams: { pickup: params.pickup, pickupCoordinates: params.pickupCoordinates },
+        fromStore: storePickup,
+        resolved: { pickup, pickupCoordinates },
+    });
+
     const { t, isRTL, language } = useLanguage();
     const { colors, spacing, radius, shadow, isDark } = useTheme();
 
@@ -75,15 +101,58 @@ export default function TripOptionsScreen() {
     const [promoInput, setPromoInput] = useState('');
     const [appliedPromo, setAppliedPromo] = useState<string | null>(null);
 
-    // Animation
-    const slideUp = useRef(new Animated.Value(300)).current;
+    // Bottom sheet pan animation
+    const panY = useRef(new Animated.Value(SNAP_POINTS.closed)).current;
+    const lastSnap = useRef(SNAP_POINTS.closed);
+    const rideListScrolling = useRef(false);
+
+    const panResponder = useRef(
+        PanResponder.create({
+            onMoveShouldSetPanResponder: (_, gesture) => {
+                if (rideListScrolling.current) return false;
+                return Math.abs(gesture.dy) > Math.abs(gesture.dx) && Math.abs(gesture.dy) > 4;
+            },
+            onStartShouldSetPanResponder: () => !rideListScrolling.current,
+            onPanResponderGrant: () => {
+                panY.stopAnimation();
+                panY.setOffset(lastSnap.current);
+                panY.setValue(0);
+            },
+            onPanResponderMove: Animated.event([null, { dy: panY }], { useNativeDriver: false }),
+            onPanResponderRelease: (_, gesture) => {
+                panY.flattenOffset();
+                const current = Math.min(Math.max(panY.__getValue(), SNAP_POINTS.open), SNAP_POINTS.closed);
+                const deltas = [SNAP_POINTS.open, SNAP_POINTS.mid, SNAP_POINTS.closed].map((p) => ({ p, d: Math.abs(current - p) }));
+                deltas.sort((a, b) => a.d - b.d);
+                const target = deltas[0].p;
+                lastSnap.current = target;
+                Animated.spring(panY, { toValue: target, useNativeDriver: true, bounciness: 6 }).start();
+            },
+        })
+    ).current;
 
     useEffect(() => {
-        Animated.timing(slideUp, {
-            toValue: 0,
-            duration: 500,
-            useNativeDriver: true,
-        }).start();
+        Animated.spring(panY, { toValue: SNAP_POINTS.mid, useNativeDriver: true, bounciness: 6 }).start(() => {
+            lastSnap.current = SNAP_POINTS.mid;
+        });
+    }, []);
+
+    // Preload ride images to avoid delays when rendering the list
+    useEffect(() => {
+        const modules = [
+            RIDE_IMAGES.saver,
+            RIDE_IMAGES.comfort,
+            RIDE_IMAGES.vip,
+            RIDE_IMAGES.taxi,
+            RIDE_IMAGES.scooter,
+        ];
+
+        const assets = modules.map((m: any) => Asset.fromModule(m));
+        assets.forEach((asset) => {
+            if (!asset.downloaded) {
+                asset.downloadAsync().catch(() => {});
+            }
+        });
     }, []);
 
     // Auto-Request Logic
@@ -93,6 +162,24 @@ export default function TripOptionsScreen() {
         }
     }, [autoRequest, routeInfo, routeLoading, routeCoords]);
 
+    // Initialize coords from params immediately to avoid flicker and wrong fallback
+    useEffect(() => {
+        console.log('[TripOptions] params pickup/dest', {
+            pickup,
+            pickupCoordinates,
+            destination,
+            destinationCoordinates,
+        });
+        if (pickupCoordinates) {
+            setPickupCoords({ latitude: pickupCoordinates[1], longitude: pickupCoordinates[0] });
+        }
+        if (destinationCoordinates) {
+            setDestCoords({ latitude: destinationCoordinates[1], longitude: destinationCoordinates[0] });
+        }
+        // Clear the store so stale data doesn't bleed into the next trip
+        clearPickupSelection();
+    }, [pickupCoordinates, destinationCoordinates]);
+
     // 1. Resolve Coords & Fetch Route
     useEffect(() => {
         const initRoute = async (retryCount = 0) => {
@@ -100,16 +187,14 @@ export default function TripOptionsScreen() {
             setRouteError(null);
             setRouteCoords([]);
             setRouteInfo(null);
-            setPickupCoords(null);
-            setDestCoords(null);
 
             try {
-                // 1. Get Pickup Coords
-                let pCoords: { latitude: number; longitude: number } | null = null;
+                // 1. Get Pickup Coords (prefer already-resolved state)
+                let pCoords: { latitude: number; longitude: number } | null = pickupCoords;
 
-                if (pickupCoordinates) {
+                if (!pCoords && pickupCoordinates) {
                     pCoords = { latitude: pickupCoordinates[1], longitude: pickupCoordinates[0] };
-                } else if (pickup === 'Current Location' || pickup === t('currentLocation') || !pickup) {
+                } else if (!pCoords && (pickup === 'Current Location' || pickup === t('currentLocation') || !pickup)) {
                     const { status } = await Location.requestForegroundPermissionsAsync();
                     if (status === 'granted') {
                         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -140,14 +225,16 @@ export default function TripOptionsScreen() {
                 if (!pCoords) {
                     throw new Error('PICKUP_GEOCODE_FAILED');
                 }
+                console.log('[TripOptions] resolved pickup coords', pCoords);
                 setPickupCoords(pCoords);
 
                 // 2. Get Dest Coords
-                let dCoords = { latitude: 0, longitude: 0 };
-                if (destinationCoordinates) {
+                let dCoords = destCoords || { latitude: 0, longitude: 0 };
+                if (!destCoords && destinationCoordinates) {
                     dCoords = { latitude: destinationCoordinates[1], longitude: destinationCoordinates[0] };
                     setDestCoords(dCoords);
                 }
+                console.log('[TripOptions] resolved dest coords', dCoords);
 
                 // 3. Fetch Directions with timeout
                 if (pCoords.latitude !== 0 && dCoords.latitude !== 0) {
@@ -410,6 +497,34 @@ export default function TripOptionsScreen() {
         }
     };
 
+    const initialRegion = useMemo(() => {
+        if (pickupCoordinates) {
+            return { latitude: pickupCoordinates[1], longitude: pickupCoordinates[0], latitudeDelta: 0.01, longitudeDelta: 0.01 };
+        }
+        if (destinationCoordinates) {
+            return { latitude: destinationCoordinates[1], longitude: destinationCoordinates[0], latitudeDelta: 0.01, longitudeDelta: 0.01 };
+        }
+        if (pickupCoords) {
+            return { latitude: pickupCoords.latitude, longitude: pickupCoords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
+        }
+        if (destCoords) {
+            return { latitude: destCoords.latitude, longitude: destCoords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 };
+        }
+        return { latitude: 30.0444, longitude: 31.2357, latitudeDelta: 0.1, longitudeDelta: 0.1 };
+    }, [pickupCoords, destCoords, pickupCoordinates, destinationCoordinates]);
+
+    useEffect(() => {
+        if (pickupCoords && mapRef.current) {
+            console.log('[TripOptions] animateTo pickupCoords', pickupCoords);
+            mapRef.current.animateToRegion({
+                latitude: pickupCoords.latitude,
+                longitude: pickupCoords.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            }, 400);
+        }
+    }, [pickupCoords]);
+
     return (
         <View style={styles.container}>
             {/* --- REAL MAP LAYER --- */}
@@ -418,10 +533,7 @@ export default function TripOptionsScreen() {
                     key={`trip-options-map-${isDark ? 'dark' : 'light'}`}
                     ref={mapRef}
                     style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? '#212121' : '#f5f5f5' }]}
-                    initialRegion={{
-                        latitude: 30.0444, longitude: 31.2357,
-                        latitudeDelta: 0.1, longitudeDelta: 0.1
-                    }}
+                    initialRegion={initialRegion}
                     mapType={Platform.OS === 'android' ? 'none' : 'standard'}
                     customMapStyle={isDark ? DARK_EMPTY_MAP_STYLE : EMPTY_MAP_STYLE}
                     userInterfaceStyle={isDark ? 'dark' : 'light'}
@@ -471,7 +583,10 @@ export default function TripOptionsScreen() {
             </View>
 
             {/* --- BOTTOM SHEET --- */}
-            <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: slideUp }], backgroundColor: colors.surface, shadowColor: colors.shadow }]}>
+            <Animated.View
+                style={[styles.bottomSheet, { transform: [{ translateY: panY }], backgroundColor: colors.surface, shadowColor: colors.shadow }]}
+                {...panResponder.panHandlers}
+            >
 
                 {/* Route Header */}
                 {/* Route Header */}
@@ -497,13 +612,65 @@ export default function TripOptionsScreen() {
 
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
+                {/* Payment & Promo Controls */}
+                <View style={{ marginBottom: 16 }}>
+                    <Text variant="h3" style={[styles.sectionTitle, { textAlign, color: colors.textPrimary }]}>{t('paymentAndPromotions') || 'Payment & Promotions'}</Text>
+                    <View style={[styles.paymentRow, { flexDirection }]}>
+                        <TouchableOpacity
+                            style={[styles.paymentSelect, { flexDirection }]}
+                            onPress={() => setShowPaymentModal(true)}
+                        >
+                            {paymentMethod === 'Cash' ? (
+                                <CreditCard size={20} color={colors.primary} />
+                            ) : (
+                                <Wallet size={20} color={colors.primary} />
+                            )}
+                            <Text variant="body" weight="bold" style={{ color: colors.textPrimary, marginLeft: isRTL ? 0 : 8, marginRight: isRTL ? 8 : 0 }}>
+                                {paymentMethod === 'Cash' ? (t('cash') || 'Cash') : (t('wallet') || 'Wallet')}
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.promoSelect, appliedPromo ? { backgroundColor: isDark ? 'rgba(6, 78, 59, 0.5)' : '#DCFCE7' } : null, { flexDirection }]}
+                            onPress={() => setShowPromoModal(true)}
+                        >
+                            <BadgePercent size={18} color={appliedPromo ? (isDark ? '#34D399' : '#166534') : "#F97316"} />
+                            <Text
+                                variant="body"
+                                weight="bold"
+                                style={[
+                                    styles.promoLinkText,
+                                    {
+                                        color: appliedPromo ? (isDark ? '#34D399' : '#166534') : colors.primary,
+                                        marginLeft: isRTL ? 0 : 8,
+                                        marginRight: isRTL ? 8 : 0,
+                                    }
+                                ]}
+                            >
+                                {appliedPromo ? appliedPromo : (t('promoCode') || 'Promo Code')}
+                            </Text>
+                            {appliedPromo && (
+                                <TouchableOpacity onPress={handleRemovePromo} style={{ marginLeft: isRTL ? 0 : 4, marginRight: isRTL ? 4 : 0 }}>
+                                    <X size={14} color={isDark ? '#34D399' : '#166534'} />
+                                </TouchableOpacity>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
                 <Text variant="h3" style={[styles.sectionTitle, { textAlign, color: colors.textPrimary }]}>{t('chooseRide') || 'Choose a ride'}</Text>
 
                 {/* Ride Options (Vertical List) */}
                 <ScrollView
-                    style={styles.ridesList}
+                    style={[styles.ridesList, { maxHeight: RIDE_LIST_MAX_HEIGHT }]}
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={{ paddingBottom: 20 }}
+                    nestedScrollEnabled
+                    onTouchStart={() => { rideListScrolling.current = true; }}
+                    onTouchEnd={() => { rideListScrolling.current = false; }}
+                    onScrollBeginDrag={() => { rideListScrolling.current = true; }}
+                    onScrollEndDrag={() => { rideListScrolling.current = false; }}
+                    onMomentumScrollEnd={() => { rideListScrolling.current = false; }}
                 >
                     {ridesData.map((ride) => (
                         <TouchableOpacity
@@ -531,8 +698,12 @@ export default function TripOptionsScreen() {
                             </View>
 
                             {/* Icon Section */}
-                            <View style={[styles.rideIconWrapper, isRTL ? { marginLeft: 8 } : { marginRight: 8 }]}>
-                                <Image source={ride.image} style={styles.rideImage} resizeMode="contain" />
+                            <View style={[styles.rideIconWrapper, isRTL ? { marginLeft: 14 } : { marginRight: 14 }]}>
+                                <Image
+                                    source={ride.image}
+                                    style={styles.rideImage}
+                                    resizeMode="contain"
+                                />
                             </View>
 
                             {/* Info Section */}
@@ -568,35 +739,6 @@ export default function TripOptionsScreen() {
 
                 {/* Footer Action */}
                 <View style={[styles.footer, { borderTopColor: colors.border }]}>
-                    <View style={[styles.paymentRow, { flexDirection }]}>
-                        <TouchableOpacity
-                            style={[styles.paymentSelect, { flexDirection }]}
-                            onPress={() => setShowPaymentModal(true)}
-                        >
-                            {paymentMethod === 'Cash' ? (
-                                <CreditCard size={20} color={colors.primary} />
-                            ) : (
-                                <Wallet size={20} color={colors.primary} />
-                            )}
-                            <Text variant="body" weight="bold" style={{ color: colors.textPrimary, marginLeft: 8 }}>{paymentMethod === 'Cash' ? (t('cash') || 'Cash') : (t('wallet') || 'Wallet')}</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.promoSelect, appliedPromo ? { backgroundColor: isDark ? 'rgba(6, 78, 59, 0.5)' : '#DCFCE7' } : null, { flexDirection }]}
-                            onPress={() => setShowPromoModal(true)}
-                        >
-                            <BadgePercent size={18} color={appliedPromo ? (isDark ? '#34D399' : '#166534') : "#F97316"} />
-                            <Text variant="body" weight="bold" style={[styles.promoLinkText, { color: appliedPromo ? (isDark ? '#34D399' : '#166534') : colors.primary, marginLeft: 8 }]}>
-                                {appliedPromo ? appliedPromo : (t('promoCode') || 'Promo Code')}
-                            </Text>
-                            {appliedPromo && (
-                                <TouchableOpacity onPress={handleRemovePromo} style={{ marginLeft: 4 }}>
-                                    <X size={14} color={isDark ? '#34D399' : '#166534'} />
-                                </TouchableOpacity>
-                            )}
-                        </TouchableOpacity>
-                    </View>
-
                     <TouchableOpacity
                         style={[styles.requestButton, requesting && { opacity: 0.8 }]}
                         onPress={handleRequest}
@@ -673,17 +815,35 @@ export default function TripOptionsScreen() {
                                     <Text variant="h3" style={{ textAlign, color: colors.textPrimary }}>{t('enterPromoCode') || "Enter Promo Code"}</Text>
                                     <Text variant="body" style={{ textAlign, color: colors.textSecondary, marginBottom: 20 }}>{t('promoSubtitle') || "Have a discount code? Enter it below."}</Text>
 
-                                    <Input
-                                        placeholder={t('promoPlaceholder') || "e.g. SMART50"}
-                                        value={promoInput}
-                                        onChangeText={setPromoInput}
-                                        autoCapitalize="characters"
-                                        style={{ textAlign, marginBottom: 16 }}
-                                    />
+                                    <View style={[styles.promoInputCard, { borderColor: colors.border, backgroundColor: colors.surfaceHighlight }]}>
+                                        <View style={[styles.promoInputHeader, { flexDirection }] }>
+                                            <View style={[styles.promoBadgeIcon, { backgroundColor: isDark ? 'rgba(6,78,59,0.4)' : '#ECFDF5' }] }>
+                                                <BadgePercent size={20} color={isDark ? '#34D399' : '#059669'} />
+                                            </View>
+                                            <View style={{ flex: 1, marginHorizontal: 12 }}>
+                                                <Text variant="body" weight="bold" style={{ color: colors.textPrimary }}>{t('promoYourRide') || 'Save on your ride'}</Text>
+                                                <Text variant="caption" style={{ color: colors.textSecondary }}>{t('promoHint') || 'Codes are not case sensitive.'}</Text>
+                                            </View>
+                                        </View>
 
-                                    <TouchableOpacity style={[styles.applyButton, { backgroundColor: colors.primary }]} onPress={handleApplyPromo}>
-                                        <Text variant="body" weight="bold" style={{ color: '#fff' }}>{t('applyCode') || "Apply Code"}</Text>
-                                    </TouchableOpacity>
+                                        <View style={[styles.promoFieldRow, { flexDirection }]}>
+                                            <TextInput
+                                                placeholder={t('promoPlaceholder') || "SMART50"}
+                                                value={promoInput}
+                                                onChangeText={(text) => setPromoInput(text.toUpperCase())}
+                                                autoCapitalize="characters"
+                                                placeholderTextColor={colors.textMuted}
+                                                style={[styles.promoTextField, { borderColor: colors.border, color: colors.textPrimary, textAlign }]}
+                                            />
+                                            <TouchableOpacity
+                                                style={[styles.promoApplyButton, { backgroundColor: colors.primary }]}
+                                                onPress={handleApplyPromo}
+                                                activeOpacity={0.9}
+                                            >
+                                                <Text variant="body" weight="bold" style={{ color: '#fff' }}>{t('apply') || 'Apply'}</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
 
                                     {/* Available Promos List */}
                                     <View style={{ width: '100%', marginTop: 16 }}>
@@ -758,7 +918,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
 
     // Map & Background
-    mapLayer: { position: 'absolute', top: 0, left: 0, right: 0, height: height * 0.5, backgroundColor: '#EFF6FF' },
+    mapLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: '#EFF6FF' },
     mapBackground: { flex: 1, backgroundColor: '#EEF2FF' },
     street: { position: 'absolute', backgroundColor: '#fff', opacity: 0.5 },
     backButton: { position: 'absolute', top: 60, backgroundColor: '#fff', padding: 10, borderRadius: 20, shadowColor: '#000', shadowOpacity: 0.1, elevation: 5 }, // Left/Right handled dynamically
@@ -767,26 +927,17 @@ const styles = StyleSheet.create({
     routeLineContainer: { position: 'absolute', top: '30%', left: '20%', width: '60%', height: 100 },
     routeLine: { position: 'absolute', top: 10, left: 10, width: 2, height: 100, backgroundColor: '#1e1e1e', opacity: 0.2, transform: [{ rotate: '45deg' }] }, // Abstract line
     routeDotPickup: { position: 'absolute', top: 0, left: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#10B981', borderWidth: 2, borderColor: '#fff' },
-    routeDotDropoff: { position: 'absolute', bottom: 0, right: 0, width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444', borderWidth: 2, borderColor: '#fff' },
-
 
     // Bottom Sheet
     bottomSheet: {
-        position: 'absolute', bottom: 0, width: width, height: height * 0.65,
-        backgroundColor: '#fff',
-        borderTopLeftRadius: 24, borderTopRightRadius: 24,
-        paddingTop: 24, paddingHorizontal: 20,
-        shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.1, shadowRadius: 20, elevation: 20
+        position: 'absolute', bottom: 0, width: '100%',
+        backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+        padding: 24, paddingBottom: 50,
+        shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.15, shadowRadius: 15, elevation: 20,
+        zIndex: 20,
     },
 
-    // Route Info Header
-    routeInfo: { marginBottom: 16 },
-    routeNode: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
-    dot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
-    addressText: { fontSize: 16, fontWeight: '600', color: '#1e1e1e', flex: 1 },
-    verticalLineWrapper: { paddingLeft: 4.5, height: 16 }, // Center line with dot
-    verticalLine: { width: 1, height: '100%', backgroundColor: '#E5E7EB' },
-
+// ...
     divider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
 
     sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#1e1e1e', marginBottom: 16 },
@@ -801,7 +952,7 @@ const styles = StyleSheet.create({
     },
     rideCardSelected: { borderColor: Colors.primary, backgroundColor: '#F0F9FF' },
 
-    rideIconWrapper: { width: 110, height: 75, alignItems: 'center', justifyContent: 'center', marginRight: 8, backgroundColor: 'transparent' },
+    rideIconWrapper: { width: 140, height: 90, alignItems: 'center', justifyContent: 'center', marginRight: 8, backgroundColor: 'transparent' },
     rideImage: { width: '100%', height: '100%', backgroundColor: 'transparent' },
 
     rideInfo: { flex: 1 },
@@ -842,8 +993,12 @@ const styles = StyleSheet.create({
     selectedDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.primary },
 
     promoInput: { width: '100%', height: 50, borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 12, paddingHorizontal: 16, fontSize: 16, color: '#1e1e1e', marginBottom: 16, backgroundColor: '#F9FAFB' },
-    applyButton: { width: '100%', backgroundColor: Colors.primary, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
-    applyButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+    promoInputCard: { width: '100%', borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 16 },
+    promoInputHeader: { alignItems: 'center', marginBottom: 12 },
+    promoBadgeIcon: { width: 42, height: 42, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    promoFieldRow: { alignItems: 'center', gap: 12 },
+    promoTextField: { flex: 1, height: 52, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 16, fontSize: 16, fontWeight: '600', letterSpacing: 1 },
+    promoApplyButton: { paddingHorizontal: 18, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     cancelButton: { padding: 8 },
     cancelButtonText: { color: '#6B7280', fontSize: 16, fontWeight: '500' },
 

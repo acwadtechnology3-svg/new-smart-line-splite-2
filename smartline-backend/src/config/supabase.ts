@@ -16,4 +16,17 @@ if (!process.env.SUPABASE_SERVICE_KEY) {
     console.warn("WARNING: Using Anon Key. RLS policies might block backend operations. Please add SUPABASE_SERVICE_KEY to .env");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Increased timeout for slow network conditions
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+        persistSession: false
+    },
+    global: {
+        // High timeout for slow connections
+        fetch: (url, options) => fetch(url, {
+            ...options,
+            // @ts-ignore - Support for AbortSignal.timeout
+            signal: options?.signal || AbortSignal.timeout(30000)
+        })
+    }
+});

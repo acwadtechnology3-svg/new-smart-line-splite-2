@@ -9,7 +9,7 @@ const poolConfig: PoolConfig | null = config.DATABASE_URL ? {
   max: 20, // Maximum number of clients in the pool
   min: 5, // Minimum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 10000, // Fail fast if can't connect within 10 seconds
+  connectionTimeoutMillis: 30000, // Fail fast if can't connect within 30 seconds
 
   // SSL configuration (required for Supabase and production)
   ssl: config.DATABASE_URL?.includes('localhost') || config.DATABASE_URL?.includes('127.0.0.1')
@@ -105,7 +105,7 @@ export async function closePool(): Promise<void> {
 }
 
 // Query helper with timeout
-export async function query(text: string, params?: any[], timeout: number = 10000) {
+export async function query(text: string, params?: any[], timeout: number = 20000) {
   if (!pool) {
     throw new Error('Database pool not initialized. Set DATABASE_URL in environment variables.');
   }

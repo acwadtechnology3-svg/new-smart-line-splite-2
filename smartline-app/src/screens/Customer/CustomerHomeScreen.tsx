@@ -20,6 +20,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import ChatBotButton from '../../components/ChatBot/ChatBotButton';
 import ChatBotModal from '../../components/ChatBot/ChatBotModal';
 import { getActiveBanners, PromoBanner } from '../../services/bannerService';
+import { getCachedBanners, cacheBanners, isBannerCacheValid } from '../../services/imageCacheService';
 
 type CustomerHomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'CustomerHome'>;
 
@@ -177,14 +178,42 @@ export default function CustomerHomeScreen() {
         })();
     }, []);
 
+    // Once location is available, animate the map to the user's current position
+    useEffect(() => {
+        if (location && mapRef.current) {
+            mapRef.current.animateToRegion({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+            }, 500);
+        }
+    }, [location]);
+
     useEffect(() => {
         const fetchBanners = async () => {
             try {
                 setBannersLoading(true);
+                
+                const cachedBanners = await getCachedBanners();
+                if (cachedBanners) {
+                    setPromoBanners(cachedBanners);
+                }
+                
                 const { banners } = await getActiveBanners('customer');
+                
+                const isCacheValid = await isBannerCacheValid(banners);
+                if (!isCacheValid) {
+                    await cacheBanners(banners);
+                }
+                
                 setPromoBanners(banners);
             } catch (error) {
                 console.log('Error fetching banners:', error);
+                const cachedBanners = await getCachedBanners();
+                if (cachedBanners) {
+                    setPromoBanners(cachedBanners);
+                }
             } finally {
                 setBannersLoading(false);
             }
@@ -464,7 +493,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28,
         padding: 24, paddingBottom: 50,
         shadowColor: '#000', shadowOffset: { width: 0, height: -5 }, shadowOpacity: 0.15, shadowRadius: 15, elevation: 20,
-        zIndex: 20
+        zIndex: 20,
+        minHeight: height * 0.92,
     },
     dragHandle: { width: 40, height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
 

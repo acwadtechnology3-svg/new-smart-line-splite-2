@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated, Alert, Image, ScrollView, Platform } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, StackActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { X, MapPin, Navigation as NavigationIcon, Car, Star, User, Palette } from 'lucide-react-native';
 import { RootStackParamList } from '../../types/navigation';
@@ -286,6 +286,29 @@ export default function SearchingDriverScreen() {
         }
     };
 
+    const navigateBackToTripOptions = useCallback((overrideTrip?: any) => {
+        const tripData = overrideTrip || trip;
+
+        const params = tripData ? {
+            pickup: tripData.pickup_address || t('currentLocation') || 'Current Location',
+            destination: tripData.dest_address || '',
+            pickupCoordinates: (tripData.pickup_lat && tripData.pickup_lng)
+                ? [parseFloat(tripData.pickup_lng), parseFloat(tripData.pickup_lat)] as [number, number]
+                : undefined,
+            destinationCoordinates: (tripData.dest_lat && tripData.dest_lng)
+                ? [parseFloat(tripData.dest_lng), parseFloat(tripData.dest_lat)] as [number, number]
+                : undefined,
+        } : {
+            pickup: '',
+            destination: '',
+        };
+
+        navigation.reset({
+            index: 0,
+            routes: [{ name: 'TripOptions', params }],
+        });
+    }, [navigation, trip, t]);
+
     const handleCancel = () => {
         Alert.alert(
             'Cancel Trip',
@@ -306,25 +329,26 @@ export default function SearchingDriverScreen() {
                             if (data.trip) {
                                 if (data.trip.is_travel_request) {
                                     // Go back to Intercity Screen
-                                    navigation.replace('TravelRequest', {
-                                        pickup: { address: data.trip.pickup_address, lat: data.trip.pickup_lat, lng: data.trip.pickup_lng },
-                                        destination: { address: data.trip.dest_address, lat: data.trip.dest_lat, lng: data.trip.dest_lng }
+                                    navigation.reset({
+                                        index: 0,
+                                        routes: [{
+                                            name: 'TravelRequest',
+                                            params: {
+                                                pickup: { address: data.trip.pickup_address, lat: data.trip.pickup_lat, lng: data.trip.pickup_lng },
+                                                destination: { address: data.trip.dest_address, lat: data.trip.dest_lat, lng: data.trip.dest_lng }
+                                            }
+                                        }],
                                     });
                                 } else {
-                                    // Navigate back to options with pre-filled addresses
-                                    navigation.replace('TripOptions', {
-                                        pickup: data.trip.pickup_address,
-                                        destination: data.trip.dest_address,
-                                        destinationCoordinates: [data.trip.dest_lng, data.trip.dest_lat]
-                                    });
+                                    navigateBackToTripOptions(data.trip);
                                 }
                             } else {
-                                navigation.goBack();
+                                navigateBackToTripOptions();
                             }
                         } catch (err) {
                             console.error('[SearchingDriver] Cancel Error:', err);
                             // Even if error, likely want to leave this screen if user intends to cancel
-                            navigation.goBack();
+                            navigateBackToTripOptions();
                         }
                     },
                 },

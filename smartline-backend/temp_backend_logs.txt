@@ -1,0 +1,78 @@
+﻿
+> smartline-backend@1.0.0 dev
+> nodemon src/index.ts
+
+[33m[nodemon] 3.1.11[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): *.*[39m
+[33m[nodemon] watching extensions: ts,json[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+≡ƒöº Redis version patch applied (faking 5.0.0 for Windows compatibility)
+[dotenv@17.3.1] injecting env (16) from .env -- tip: ≡ƒ¢á∩╕Å  run anywhere with `dotenvx run -- yourcommand`
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  override existing env vars with { override: true }
+Γ£à Realtime WebSocket server started at /ws
+[Socket] Γ£à Socket.IO server initialized
+[2026-02-16 22:21:44.909 +0200] [41mFATAL[49m: [36m Uncaught Exception[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "uncaught_exception"
+    error: {
+      "message": "listen EADDRINUSE: address already in use 0.0.0.0:3000",
+      "stack":
+          Error: listen EADDRINUSE: address already in use 0.0.0.0:3000
+              at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+              at listenInCluster (node:net:1997:12)
+              at node:net:2206:7
+              at processTicksAndRejections (node:internal/process/task_queues:89:21)
+    }
+≡ƒ¢æ Admin location feed service stopped
+Γ£à Location sync worker stopped
+Redis connection closed gracefully
+[2026-02-16 22:21:44.914 +0200] [32mINFO[39m: [36m Received UNCAUGHT_EXCEPTION, shutting down gracefully[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_shutdown_started"
+[2026-02-16 22:21:44.915 +0200] [32mINFO[39m: [36m HTTP server closed[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_closed"
+[2026-02-16 22:21:44.917 +0200] [32mINFO[39m: [36m Graceful shutdown completed[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_shutdown_completed"
+[32m[nodemon] clean exit - waiting for changes before restart[39m
+[32m[nodemon] restarting due to changes...[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+≡ƒöº Redis version patch applied (faking 5.0.0 for Windows compatibility)
+[dotenv@17.3.1] injecting env (16) from .env -- tip: ≡ƒöÉ encrypt with Dotenvx: https://dotenvx.com
+[32m[nodemon] restarting due to changes...[39m
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  enable debug logging with { debug: true }
+[32m[nodemon] starting `ts-node src/index.ts`[39m
+≡ƒöº Redis version patch applied (faking 5.0.0 for Windows compatibility)
+[dotenv@17.3.1] injecting env (16) from .env -- tip: ΓÜÖ∩╕Å  enable debug logging with { debug: true }
+[dotenv@17.3.1] injecting env (0) from .env -- tip: ΓÜÖ∩╕Å  enable debug logging with { debug: true }
+Γ£à Realtime WebSocket server started at /ws
+[Socket] Γ£à Socket.IO server initialized
+[2026-02-16 22:26:49.495 +0200] [41mFATAL[49m: [36m Uncaught Exception[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "uncaught_exception"
+    error: {
+      "message": "listen EADDRINUSE: address already in use 0.0.0.0:3000",
+      "stack":
+          Error: listen EADDRINUSE: address already in use 0.0.0.0:3000
+              at Server.setupListenHandle [as _listen2] (node:net:1940:16)
+              at listenInCluster (node:net:1997:12)
+              at node:net:2206:7
+              at processTicksAndRejections (node:internal/process/task_queues:89:21)
+    }
+≡ƒ¢æ Admin location feed service stopped
+Γ£à Location sync worker stopped
+Redis connection closed gracefully
+[2026-02-16 22:26:49.502 +0200] [32mINFO[39m: [36m Received UNCAUGHT_EXCEPTION, shutting down gracefully[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_shutdown_started"
+[2026-02-16 22:26:49.503 +0200] [32mINFO[39m: [36m HTTP server closed[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_closed"
+[2026-02-16 22:26:49.507 +0200] [32mINFO[39m: [36m Graceful shutdown completed[39m
+    [35menv[39m: "development"
+    [35mevent[39m: "server_shutdown_completed"
+[32m[nodemon] clean exit - waiting for changes before restart[39m
+[32m[nodemon] restarting child process[39m
+[32m[nodemon] starting `ts-node src/index.ts`[39m
