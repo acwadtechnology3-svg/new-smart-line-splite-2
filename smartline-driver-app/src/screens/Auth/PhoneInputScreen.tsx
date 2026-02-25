@@ -40,8 +40,14 @@ export default function PhoneInputScreen() {
                 // User exists -> Password
                 navigation.navigate('Password', { phone: fullPhone });
             } else {
-                // User does not exist -> Signup (Skipping OTP for now as requested)
-                navigation.navigate('Signup', { phone: fullPhone });
+                // New user -> Send OTP then navigate to verification
+                try {
+                    await axios.post(`${API_URL}/auth/otp/send`, { phone: fullPhone }, { timeout: 15000 });
+                } catch (otpErr: any) {
+                    console.warn('[PhoneInput] OTP send warning:', otpErr.message);
+                    // Continue to OTP screen even if send fails; user can resend there
+                }
+                navigation.navigate('OTPVerification', { phone: fullPhone, purpose: 'signup' });
             }
 
         } catch (err: any) {

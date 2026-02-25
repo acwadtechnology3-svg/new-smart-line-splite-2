@@ -76,6 +76,143 @@ export const deleteAccount = async (req: Request, res: Response) => {
   }
 };
 
+// Admin hard delete: null trip FK references, remove driver row, delete user
+export const adminHardDeleteUser = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params as { userId: string };
+
+    // Guard: do not allow deleting currently authenticated admin themselves via this route
+    if (req.user?.id === userId) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+
+    // Ensure user exists
+    const { data: targetUser, error: fetchError } = await supabase
+      .from('users')
+      .select('id, role')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Block if active trips exist for this user as customer or driver
+    const { data: activeTrips, error: tripError } = await supabase
+      .from('trips')
+      .select('id')
+      .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
+      .in('status', ['requested', 'accepted', 'arrived', 'started']);
+
+    if (tripError) {
+      console.error('[adminHardDeleteUser] trip check failed:', tripError);
+      return res.status(500).json({ error: 'Failed to check active trips' });
+    }
+
+    if (activeTrips && activeTrips.length > 0) {
+      return res.status(400).json({ error: 'Cannot delete account while active trips exist. Please complete or cancel them first.' });
+    }
+
+    // Null FK references in trips to avoid constraint violations
+    await supabase.from('trips').update({ customer_id: null }).eq('customer_id', userId);
+    await supabase.from('trips').update({ driver_id: null }).eq('driver_id', userId);
+
+    // Clear search history ownership to avoid FK blocks
+    await supabase.from('search_history').update({ user_id: null }).eq('user_id', userId);
+
+    // Remove driver row if exists
+    await supabase.from('drivers').delete().eq('id', userId);
+
+    // Delete user
+    const { error: deleteError } = await supabase.from('users').delete().eq('id', userId);
+    if (deleteError) {
+      console.error('[adminHardDeleteUser] failed to delete user:', deleteError);
+      return res.status(500).json({ error: 'Failed to delete user' });
+    }
+
+    res.json({ success: true, message: 'User fully removed' });
+  } catch (err: any) {
+    console.error('Admin hard delete user error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Admin-initiated soft delete (archive) for any user
+export const adminArchiveUser = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params as { userId: string };
+
+    // Guard: do not allow deleting currently authenticated admin themselves via this route
+    if (req.user?.id === userId) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+
+    // Ensure user exists
+    const { data: targetUser, error: fetchError } = await supabase
+      .from('users')
+      .select('id, role')
+      .eq('id', userId)
+      .single();
+
+    if (fetchError || !targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Block if active trips exist for this user as customer or driver
+    const { data: activeTrips, error: tripError } = await supabase
+      .from('trips')
+      .select('id')
+      .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
+      .in('status', ['requested', 'accepted', 'arrived', 'started']);
+
+    if (tripError) {
+      console.error('[adminArchiveUser] trip check failed:', tripError);
+      return res.status(500).json({ error: 'Failed to check active trips' });
+    }
+
+    if (activeTrips && activeTrips.length > 0) {
+      return res.status(400).json({ error: 'Cannot delete account while active trips exist. Please complete or cancel them first.' });
+    }
+
+    // Soft delete/anonymize user
+    const now = Date.now();
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({
+        deleted_at: new Date().toISOString(),
+        phone: `deleted_${now}_${userId}`,
+        full_name: 'Deleted User',
+        email: null,
+        // optional flags
+        status: 'inactive'
+      })
+      .eq('id', userId);
+
+    if (updateError) {
+      console.error('[adminArchiveUser] failed to soft delete user:', updateError);
+      return res.status(500).json({ error: 'Failed to delete account' });
+    }
+
+    // If driver, mark offline in drivers table and clear sensitive fields
+    if (targetUser.role === 'driver') {
+      await supabase
+        .from('drivers')
+        .update({
+          is_online: false,
+          current_lat: null,
+          current_lng: null,
+          profile_photo_url: null,
+        })
+        .eq('id', userId);
+    }
+
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (err: any) {
+    console.error('Admin archive user error:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const getMe = async (req: Request, res: Response) => {
   try {
     const userId = req.user!.id;

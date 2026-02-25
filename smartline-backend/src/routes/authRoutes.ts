@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { checkPhone, signup, login, resetPassword } from '../controllers/authController';
+import { requestOtp, confirmOtp } from '../controllers/otpController';
 import { validateBody } from '../middleware/validate';
-import { checkPhoneSchema, signupSchema, loginSchema } from '../validators/schemas';
+import { checkPhoneSchema, signupSchema, loginSchema, sendOtpSchema, verifyOtpSchema } from '../validators/schemas';
 
 const router = Router();
 
@@ -10,5 +11,9 @@ router.post('/check-phone', validateBody(checkPhoneSchema), checkPhone);
 router.post('/signup', validateBody(signupSchema), signup);
 router.post('/login', validateBody(loginSchema), login);
 router.post('/reset-password', resetPassword); // Create schema if needed later
+
+// OTP routes
+router.post('/otp/send', validateBody(sendOtpSchema), requestOtp);
+router.post('/otp/verify', validateBody(verifyOtpSchema), confirmOtp);
 
 export default router;

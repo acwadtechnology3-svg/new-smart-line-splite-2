@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/rbac';
 import { getActiveRoutes, generateRouteSummary, getTripHistory } from '../controllers/tripRouteController';
+import { adminArchiveUser, adminHardDeleteUser } from '../controllers/userController';
 import { getLiveLocations } from '../controllers/adminLocationController';
 import { getSystemStats } from '../controllers/monitoringController';
 import { z } from 'zod';
@@ -29,5 +30,10 @@ router.post(
     validateParams(z.object({ tripId: uuidSchema })),
     generateRouteSummary
 );
+
+// User management (archive/soft delete)
+router.delete('/users/:userId/archive', adminArchiveUser);
+// User management (hard delete)
+router.delete('/users/:userId', adminHardDeleteUser);
 
 export default router;

@@ -20,6 +20,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Search, MoreHorizontal, Filter, Wallet, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useToast } from '@/components/ui/use-toast';
+import { apiClient } from '@/contexts/AuthContext';
 
 interface Customer {
   id: string;
@@ -35,6 +36,8 @@ export default function Customers() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCustomers();
@@ -63,6 +66,40 @@ export default function Customers() {
       setLoading(false);
     }
   }
+
+  const handleArchive = async (customer: Customer) => {
+    if (archivingId) return;
+    const confirmed = window.confirm(`Suspend and anonymize this customer? This will prevent login and keep trips for history.`);
+    if (!confirmed) return;
+
+    try {
+      setArchivingId(customer.id);
+      await apiClient(`/api/admin/users/${customer.id}/archive`, { method: 'DELETE' });
+      toast({ title: 'Account suspended', description: `${customer.full_name || 'Customer'} archived successfully.` });
+      await fetchCustomers();
+    } catch (error: any) {
+      toast({ title: 'Failed to suspend', description: error.message || 'Unable to suspend account', variant: 'destructive' });
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
+  const handleHardDelete = async (customer: Customer) => {
+    if (deletingId) return;
+    const confirmed = window.confirm(`Remove this account permanently? Trips will lose customer/driver linkage.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingId(customer.id);
+      await apiClient(`/api/admin/users/${customer.id}`, { method: 'DELETE' });
+      toast({ title: 'Account removed', description: `${customer.full_name || 'Customer'} deleted.` });
+      await fetchCustomers();
+    } catch (error: any) {
+      toast({ title: 'Failed to remove', description: error.message || 'Unable to remove account', variant: 'destructive' });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filteredCustomers = customers.filter(customer =>
     customer.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -182,7 +219,20 @@ export default function Customers() {
                           <DropdownMenuItem>View Profile</DropdownMenuItem>
                           <DropdownMenuItem>View Trips</DropdownMenuItem>
                           <DropdownMenuItem>Adjust Wallet</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">Suspend Account</DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleArchive(customer)}
+                            disabled={archivingId === customer.id}
+                          >
+                            {archivingId === customer.id ? 'Suspending...' : 'Suspend Account'}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => handleHardDelete(customer)}
+                            disabled={deletingId === customer.id}
+                          >
+                            {deletingId === customer.id ? 'Removing...' : 'Remove Account'}
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>

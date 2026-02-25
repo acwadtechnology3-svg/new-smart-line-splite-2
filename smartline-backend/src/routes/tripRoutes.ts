@@ -36,7 +36,6 @@ router.post(
 router.post(
   '/accept-offer',
   authenticate,
-  requireCustomer,
   validateBody(acceptOfferSchema),
   acceptTripOffer
 );

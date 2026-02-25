@@ -60,6 +60,20 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+// ===== OTP Schemas =====
+
+export const sendOtpSchema = z.object({
+  phone: phoneSchema,
+});
+
+export const verifyOtpSchema = z.object({
+  phone: phoneSchema,
+  code: z.string().length(4, 'OTP code must be 4 digits'),
+});
+
+export type SendOtpInput = z.infer<typeof sendOtpSchema>;
+export type VerifyOtpInput = z.infer<typeof verifyOtpSchema>;
+
 // ===== Trip Schemas =====
 
 export const createTripSchema = z.object({

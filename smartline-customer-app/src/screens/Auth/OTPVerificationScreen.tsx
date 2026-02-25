@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, SafeAreaView, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, ActivityIndicator, Alert } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ArrowLeft } from 'lucide-react-native';
 import { RootStackParamList } from '../../types/navigation';
 import { Colors } from '../../constants/Colors';
+import axios from 'axios';
+import { API_URL } from '../../config/api';
 
 type OTPVerificationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'OTPVerification'>;
 type OTPVerificationScreenRouteProp = RouteProp<RootStackParamList, 'OTPVerification'>;
@@ -19,6 +21,7 @@ export default function OTPVerificationScreen() {
 
     const [otp, setOtp] = useState(['', '', '', '']);
     const [timer, setTimer] = useState(30);
+    const [loading, setLoading] = useState(false);
 
     // Refs for input fields to manage focus
     const inputRefs = useRef<Array<TextInput | null>>([]);
@@ -55,14 +58,40 @@ export default function OTPVerificationScreen() {
         }
     };
 
-    const handleVerify = () => {
+    const handleVerify = async () => {
         const code = otp.join('');
-        if (code.length === 4) {
-            if (route.params.purpose === 'reset-password') {
-                navigation.replace('ResetPassword', { phone });
-            } else {
-                navigation.replace('Signup', { phone });
+        if (code.length !== 4) return;
+
+        setLoading(true);
+        try {
+            const res = await axios.post(`${API_URL}/auth/otp/verify`, { phone, code }, { timeout: 15000 });
+            if (res.data.success) {
+                if (route.params.purpose === 'reset-password') {
+                    navigation.replace('ResetPassword', { phone });
+                } else {
+                    navigation.replace('Signup', { phone });
+                }
             }
+        } catch (err: any) {
+            const msg = err.response?.data?.error;
+            if (msg === 'INVALID_CODE') {
+                Alert.alert(t('error'), t('invalidCode') || 'Invalid verification code. Please try again.');
+            } else {
+                Alert.alert(t('error'), t('genericError') || 'Something went wrong. Please try again.');
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResend = async () => {
+        if (timer > 0) return;
+        try {
+            await axios.post(`${API_URL}/auth/otp/send`, { phone }, { timeout: 15000 });
+            setTimer(30);
+            setOtp(['', '', '', '']);
+        } catch {
+            Alert.alert(t('error'), t('genericError') || 'Failed to resend code.');
         }
     };
 
@@ -106,7 +135,7 @@ export default function OTPVerificationScreen() {
                                 ))}
                             </View>
 
-                            <TouchableOpacity disabled={timer > 0}>
+                            <TouchableOpacity disabled={timer > 0} onPress={handleResend}>
                                 <Text style={[styles.resendText, timer === 0 && styles.resendTextActive]}>
                                     {timer > 0 ? `${t('resendCode')}\n${t('availableIn')} 0:${timer.toString().padStart(2, '0')}` : t('resendCode')}
                                 </Text>
@@ -115,11 +144,15 @@ export default function OTPVerificationScreen() {
                             <View style={{ flex: 1 }} />
 
                             <TouchableOpacity
-                                style={[styles.button, otp.join('').length === 4 ? null : styles.buttonDisabled]}
+                                style={[styles.button, (otp.join('').length !== 4 || loading) ? styles.buttonDisabled : null]}
                                 onPress={handleVerify}
-                                disabled={otp.join('').length !== 4}
+                                disabled={otp.join('').length !== 4 || loading}
                             >
-                                <Text style={styles.buttonText}>{t('verify')}</Text>
+                                {loading ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.buttonText}>{t('verify')}</Text>
+                                )}
                             </TouchableOpacity>
                         </View>
                     </View>

@@ -7,6 +7,7 @@ import { locationCache } from '../services/locationCache';
 import { tripRouteRecorder } from '../services/TripRouteRecorder';
 import { query } from '../config/database';
 import redis, { checkRedisConnection } from '../config/redis';
+import { DriverRepository } from '../repositories/DriverRepository';
 
 interface AuthSocket extends Socket {
     userId?: string;
@@ -16,6 +17,7 @@ interface AuthSocket extends Socket {
 export class SocketServer {
     private io: Server;
     private connectedDrivers: Map<string, string> = new Map(); // driverId -> socketId
+    private driverRepo = new DriverRepository();
 
     constructor(httpServer: HTTPServer) {
         const corsOrigin = config.CORS_ORIGIN === '*'
@@ -167,6 +169,14 @@ export class SocketServer {
             // 2. Route Recording Integration
             // If location update successful, check for active trip and record point
             if (updated) {
+                // Persist to database for admin/live map fallback
+                try {
+                    await this.driverRepo.setOnlineStatus(socket.userId, true);
+                    await this.driverRepo.updateLocation(socket.userId, lat, lng);
+                } catch (err) {
+                    console.error('[Socket] Failed to persist driver location to DB:', err);
+                }
+
                 const activeTripId = await this.getDriverActiveTrip(socket.userId);
                 if (activeTripId) {
                     // Add point to route recorder

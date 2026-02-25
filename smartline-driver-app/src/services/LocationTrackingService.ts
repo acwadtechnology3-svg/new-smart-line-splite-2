@@ -7,8 +7,8 @@ import { socketService } from './socketService';
 // Smart Update Configuration
 const UPDATE_CONFIG = {
     idle: {
-        timeInterval: 30000,    // 30s
-        distanceInterval: 100   // 100m
+        timeInterval: 300000,   // 5 min
+        distanceInterval: 150   // 150m
     },
     active: {
         timeInterval: 5000,     // 5s

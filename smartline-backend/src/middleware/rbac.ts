@@ -45,9 +45,9 @@ export const requireCustomer = requireRole('customer');
 export const requireDriver = requireRole('driver');
 
 /**
- * Middleware to require admin role
+ * Middleware to require admin role (admin or super_admin)
  */
-export const requireAdmin = requireRole('admin');
+export const requireAdmin = requireRole('admin', 'super_admin');
 
 /**
  * Middleware to require either customer or driver role

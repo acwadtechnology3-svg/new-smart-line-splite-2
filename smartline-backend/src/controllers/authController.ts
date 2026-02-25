@@ -3,6 +3,7 @@ import { supabase } from '../config/supabase';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { ReferralService } from '../services/referralService';
+import { assertOtpVerified } from './otpController';
 
 export const checkPhone = async (req: Request, res: Response) => {
     const { phone } = req.body;
@@ -32,6 +33,12 @@ export const signup = async (req: Request, res: Response) => {
     const { phone, password, role, name, email, referralCode } = req.body;
 
     try {
+        // 0. Verify OTP was completed for this phone
+        const otpOk = await assertOtpVerified(phone);
+        if (!otpOk) {
+            return res.status(400).json({ error: 'OTP_REQUIRED', message: 'Phone must be verified before signup' });
+        }
+
         // 1. Hash password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);

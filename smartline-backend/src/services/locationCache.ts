@@ -3,6 +3,7 @@ import redis, { checkRedisConnection } from '../config/redis';
 const DRIVER_LOCATIONS_KEY = 'driver:locations'; // Geo set for all driver locations
 const DRIVER_META_PREFIX = 'driver:'; // Hash for driver metadata
 const DRIVER_ONLINE_PREFIX = 'driver:'; // String for online status with TTL
+const ONLINE_TTL_SECONDS = 420; // 7 minutes to cover 5-minute update cadence safely
 
 export interface DriverLocation {
   driverId: string;
@@ -59,7 +60,7 @@ export class LocationCacheService {
 
       // Mark driver as online with TTL (auto-expires if no updates)
       const onlineKey = `${DRIVER_ONLINE_PREFIX}${driverId}:online`;
-      pipeline.set(onlineKey, '1', 'EX', 120); // 120 seconds TTL (supports low battery mode)
+      pipeline.set(onlineKey, '1', 'EX', ONLINE_TTL_SECONDS);
 
       await pipeline.exec();
       return true;

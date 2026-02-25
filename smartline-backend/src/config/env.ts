@@ -48,9 +48,19 @@ const envSchema = z.object({
   MAPBOX_API_KEY: z.string().optional(),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
 
+  // BEON OTP
+  BEON_OTP_ENABLED: z.string().default('false').transform((val) => val === 'true'),
+  BEON_OTP_BASE_URL: z.string().default('https://v3.api.beon.chat/api/v3'),
+  BEON_OTP_TOKEN: z.string().optional(),
+  BEON_OTP_LANG: z.string().default('ar'),
+  BEON_OTP_LENGTH: z.string().default('4').transform((val) => parseInt(val, 10)),
+
   // Monitoring (optional)
   SENTRY_DSN: z.string().url().optional(),
-});
+}).refine(
+  (data) => !data.BEON_OTP_ENABLED || !!data.BEON_OTP_TOKEN,
+  { message: 'BEON_OTP_TOKEN is required when BEON_OTP_ENABLED=true', path: ['BEON_OTP_TOKEN'] }
+);
 
 // Validate environment variables
 function validateEnv() {

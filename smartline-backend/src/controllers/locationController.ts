@@ -41,6 +41,10 @@ export const updateLocation = async (req: Request, res: Response) => {
     // Refresh driver's online presence
     await driverPresence.refreshPresence(driverId);
 
+    // Persist to database for analytics/admin views
+    await driverRepo.setOnlineStatus(driverId, true);
+    await driverRepo.updateLocation(driverId, lat, lng);
+
     // If driver is on active trip, track the route
     // TODO: Check if driver has active trip and call tripTracker.addRoutePoint()
 

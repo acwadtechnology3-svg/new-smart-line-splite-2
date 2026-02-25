@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView, ActivityIndicator, Alert, ScrollView, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, Animated } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -28,9 +28,38 @@ export default function SignupScreen() {
     const [showReferral, setShowReferral] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    useEffect(() => {
+        // Enforce OTP-first: if phone is missing, return to phone input
+        if (!phone) {
+            Alert.alert(t('error'), t('pleaseFillAllFields'));
+            navigation.replace('PhoneInput');
+        }
+    }, [phone, navigation, t]);
+
+    const isValidName = (value: string) => {
+        // Allow letters (including Arabic), spaces, hyphen, apostrophe. No digits/specials.
+        const nameRegex = /^(?=.{2,100}$)[A-Za-z\u0600-\u06FF\s'-]+$/;
+        return nameRegex.test(value.trim());
+    };
+
+    const isValidEmail = (value: string) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+        return emailRegex.test(value.trim());
+    };
+
     const handleSignup = async () => {
         if (!name || !email || !password || !confirmPassword) {
             Alert.alert(t('error'), t('pleaseFillAllFields'));
+            return;
+        }
+
+        if (!isValidName(name)) {
+            Alert.alert(t('error'), t('invalidName') || 'Name must only contain letters and spaces.');
+            return;
+        }
+
+        if (!isValidEmail(email)) {
+            Alert.alert(t('error'), t('invalidEmail') || 'Please enter a valid email address.');
             return;
         }
 
@@ -46,8 +75,8 @@ export default function SignupScreen() {
             const payload: any = {
                 phone: phone,
                 password: password,
-                email: email,
-                name: name,
+                email: email.trim(),
+                name: name.trim(),
                 role: 'driver'
             };
             // Include referral code if entered
@@ -72,11 +101,6 @@ export default function SignupScreen() {
             let message = t('signupFailed');
             if (err.message && (err.message.includes('Network Error') || err.message.includes('fetch failed'))) {
                 message = t('connectionError');
-            } else {
-                // Determine if we should show generic or signup specific
-                // t('signupFailed') is "Signup Failed. Please try again." which is good.
-                // t('genericError') is "Something went wrong."
-                // I will use signupFailed as it gives context (Action failed).
             }
 
             Alert.alert(t('error'), message);
