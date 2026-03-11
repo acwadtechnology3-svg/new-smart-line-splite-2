@@ -50,17 +50,6 @@ export default function Login() {
       <div className="login-split">
         {/* Left side - Video */}
         <div className="login-panel login-left">
-          <div className="login-video-wrapper field-stagger">
-            <video
-              className="login-video"
-              src="/Video_Generation_Complete.mp4"
-              autoPlay
-              loop
-              muted
-              playsInline
-              controls
-            />
-          </div>
           <div className="login-tagline field-stagger">
             <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">
               Smart Fleet Management
