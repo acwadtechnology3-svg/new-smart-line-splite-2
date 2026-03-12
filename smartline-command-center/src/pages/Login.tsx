@@ -10,7 +10,7 @@ import { Loader2, Shield, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -26,13 +26,13 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (!email || !password) {
-      setError('Please enter both email and password');
+    if (!username || !password) {
+      setError('Please enter both username and password');
       return;
     }
 
     try {
-      await login(email, password);
+      await login(username, password);
       toast.success('Login successful!');
       navigate('/', { replace: true });
     } catch (err: any) {
@@ -91,13 +91,13 @@ export default function Login() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2 field-stagger">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="username">Username</Label>
                   <Input
-                    id="email"
-                    type="email"
-                    placeholder="admin@smartline.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    id="username"
+                    type="text"
+                    placeholder="admin"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
                     disabled={isLoading}
                     className="h-11"
                   />

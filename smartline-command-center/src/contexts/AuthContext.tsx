@@ -27,7 +27,7 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   hasPermission: (page: string, action: 'view' | 'create' | 'edit' | 'delete') => boolean;
   canViewPage: (page: string) => boolean;
@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [isLoading, setIsLoading] = useState(false);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (username: string, password: string) => {
     setIsLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/dashboard/auth/login`, {
@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       });
 
       const data = await response.json();
