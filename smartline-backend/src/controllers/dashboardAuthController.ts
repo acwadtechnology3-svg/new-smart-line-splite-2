@@ -21,14 +21,14 @@ interface DashboardUser {
  * Login for dashboard users
  */
 export const loginDashboard = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
   try {
-    // Find user by email
+    // Find user by username (stored in full_name field)
     const { data: user, error } = await supabase
       .from('dashboard_users')
       .select('*')
-      .eq('email', email.toLowerCase().trim())
+      .eq('full_name', username.trim())
       .single();
 
     if (error || !user) {
@@ -36,7 +36,7 @@ export const loginDashboard = async (req: Request, res: Response) => {
         success: false,
         error: {
           code: 'INVALID_CREDENTIALS',
-          message: 'Invalid email or password',
+          message: 'Invalid username or password',
         },
       });
     }
@@ -59,7 +59,7 @@ export const loginDashboard = async (req: Request, res: Response) => {
         success: false,
         error: {
           code: 'INVALID_CREDENTIALS',
-          message: 'Invalid email or password',
+          message: 'Invalid username or password',
         },
       });
     }

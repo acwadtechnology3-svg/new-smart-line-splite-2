@@ -167,7 +167,7 @@ export const updateDriverStatusSchema = z.object({
 export const dashboardRoleSchema = z.enum(['super_admin', 'admin', 'manager', 'viewer']);
 
 export const dashboardLoginSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  username: z.string().min(1, 'Username is required'),
   password: z.string().min(1, 'Password is required'),
 });
 
